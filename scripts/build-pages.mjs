@@ -5,7 +5,12 @@ await rm(path('dist'), { recursive: true, force: true });
 await cp(path('public'), path('dist'), { recursive: true });
 await mkdir(path('dist/pdfjs/build'), { recursive: true });
 
+const commit = process.env.CF_PAGES_COMMIT_SHA;
+
 await Promise.all([
+  writeFile(path('dist/build-info.json'), JSON.stringify({
+    commit: commit && /^[a-f0-9]{40}$/i.test(commit) ? commit : null,
+  }) + '\n'),
   ...['pdf.mjs', 'pdf.worker.mjs'].map(file =>
     cp(path('node_modules/pdfjs-dist/build/' + file), path('dist/pdfjs/build/' + file))),
   ...['cmaps', 'standard_fonts', 'wasm'].map(dir =>
