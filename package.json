@@ -1,0 +1,17 @@
+{
+  "name": "andhrakalam",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "dev": "node --env-file-if-exists=.env server.mjs",
+    "check": "node --check server.mjs && node --check public/app.js"
+  },
+  "dependencies": {
+    "pdfjs-dist": "5.4.624"
+  }
+}
