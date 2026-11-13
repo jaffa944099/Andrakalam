@@ -4,6 +4,7 @@ import { createReadStream, mkdirSync, statSync } from 'node:fs';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { editionFields, error, indiaDay, maxPdfBytes, sample, shiftDay } from './lib/editions.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const publicRoot = resolve(root, 'public');
@@ -13,10 +14,7 @@ const editorUser = process.env.EDITOR_USER;
 const editorPassword = process.env.EDITOR_PASSWORD;
 const secureCookies = process.env.COOKIE_SECURE === '1' ||
   (process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== '0');
-const maxPdfBytes = 30 * 1024 * 1024;
 const sessionMs = 12 * 60 * 60 * 1000;
-const districts = new Set(['Andhra Pradesh', 'Amaravati', 'Visakhapatnam', 'Vijayawada', 'Guntur', 'Ongole', 'Tirupati']);
-
 if (Boolean(editorUser) !== Boolean(editorPassword) || (editorPassword && editorPassword.length < 12)) {
   throw new Error('Set EDITOR_USER and EDITOR_PASSWORD together. Use at least 12 characters for EDITOR_PASSWORD.');
 }
@@ -53,19 +51,6 @@ const signedIn = request => {
 const cookie = (token, seconds) =>
   `${sessionCookie}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${seconds}${secureCookies ? '; Secure' : ''}`;
 
-const dayFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
-const indiaDay = () => {
-  const parts = Object.fromEntries(dayFormat.formatToParts().map(part => [part.type, part.value]));
-  return `${parts.year}-${parts.month}-${parts.day}`;
-};
-const shiftDay = (value, days) => {
-  const date = new Date(`${value}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-};
-const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-  Number.isFinite(Date.parse(value)) && shiftDay(value, 0) === value;
-
 const listEditions = db.prepare(`
   SELECT id, title, title_en AS titleEn, summary, summary_en AS summaryEn,
     edition_date AS date, district, page_count AS pages
@@ -82,25 +67,12 @@ const prune = () => {
 prune();
 setInterval(prune, 60 * 60 * 1000).unref();
 
-const sample = {
-  id: 'amaravati-2026-11-09', date: '2026-11-09', district: 'Amaravati', pages: 3, sample: true,
-  title: 'ఆంధ్రకలం అమరావతి ప్రధాన సంచిక • తాజా వార్తలు',
-  titleEn: 'Andhara Kalam Amaravati Main Edition • Latest News',
-  summary: 'రాష్ట్రవ్యాప్త తాజా వార్తా విశేషాలు, రాజకీయ విశ్లేషణలు మరియు సమగ్ర నివేదిక.',
-  summaryEn: 'Statewide news, political analysis and in-depth reporting.',
-  highlights: [
-    { page: 1, title: 'రాష్ట్రవ్యాప్త సమగ్ర అభివృద్ధి పథకాల ప్రకటన', titleEn: 'Statewide development initiative announced' },
-    { page: 3, title: 'ఆర్థిక వృద్ధి & ఐటీ రంగ విస్తరణ', titleEn: 'Economic growth and IT expansion' },
-  ],
-};
-
 const types = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.webp': 'image/webp', '.wasm': 'application/wasm', '.pfb': 'application/octet-stream',
   '.ttf': 'font/ttf', '.bcmap': 'application/octet-stream',
 };
-const error = (status, code) => Object.assign(new Error(code), { status, code });
 function json(response, status, data) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   response.end(JSON.stringify(data));
@@ -135,11 +107,6 @@ function serveFile(request, response, path, base) {
   response.on('close', () => stream.destroy());
   stream.pipe(response);
 }
-function inputText(form, key, max) {
-  const value = form.get(key);
-  if (typeof value !== 'string' || value.trim().length > max) throw error(400, 'invalid_fields');
-  return value.trim();
-}
 const attempts = new Map();
 const retryAfter = 15 * 60 * 1000;
 function checkLoginRate(request) {
@@ -164,24 +131,14 @@ async function upload(request, response) {
   } catch {
     throw error(400, 'invalid_fields');
   }
-  const title = inputText(form, 'title', 160);
-  const titleEn = inputText(form, 'titleEn', 160);
-  const summary = inputText(form, 'summary', 600);
-  const summaryEn = inputText(form, 'summaryEn', 600);
-  const date = inputText(form, 'date', 10);
-  const district = inputText(form, 'district', 30);
-  const pages = Number(inputText(form, 'pages', 3));
-  const today = indiaDay();
-  if (!title || !districts.has(district) || !validDate(date) ||
-      date < shiftDay(today, -7) || date > shiftDay(today, 1) ||
-      !Number.isInteger(pages) || pages < 1 || pages > 200) throw error(400, 'invalid_fields');
+  const fields = editionFields(form);
   const file = form.get('pdf');
   if (!(file instanceof File)) throw error(400, 'invalid_pdf');
   if (file.size > maxPdfBytes) throw error(413, 'too_large');
   const pdf = Buffer.from(await file.arrayBuffer());
   if (pdf.subarray(0, 5).toString() !== '%PDF-') throw error(400, 'invalid_pdf');
   const id = randomBytes(12).toString('hex');
-  insertEdition.run(id, title, titleEn, summary, summaryEn, date, district, pages, pdf, Date.now());
+  insertEdition.run(id, ...fields, pdf, Date.now());
   json(response, 201, { id });
 }
 

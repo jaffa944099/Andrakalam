@@ -27,4 +27,26 @@ The archive keeps issues dated up to seven days before today. Expired issues are
 
 Run `npm ci --omit=optional` and `npm start` on a Node.js host with persistent storage. The process binds to `PORT` (default `8080`). Set `DATA_DIR` to a persistent mounted directory, use a single application instance with that SQLite database, and set `NODE_ENV=production` behind HTTPS so the login cookie is secure. Keep editor credentials in the host's secret settings.
 
-The new portal uses its own SQLite database. The reference site's accounts and uploaded editions are managed separately. A static host such as GitHub Pages cannot run the publishing backend.
+The new portal uses its own SQLite database. The reference site's accounts and uploaded editions are managed separately. See the next section for the Cloudflare Pages setup.
+
+## Deploy on Cloudflare Pages
+
+In **Workers & Pages → your Pages project → Settings → Build & deployments**, set the production branch to `main`, select **None** as the framework preset, and use the following settings.
+
+| Setting | Value |
+| --- | --- |
+| Root directory | Repository root (leave blank) |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+
+The repository builds the website and the PDF reader assets into `dist`. Cloudflare compiles the Pages Functions in `functions/` for the same deployment. After saving the settings, retry the latest deployment or push a new commit to `main`. The project’s **Deployments** tab shows its exact URL.
+
+The public portal and labeled sample work as soon as the build succeeds. Enable editor uploads with these production settings:
+
+1. Create a **D1 database** and run the statements from [schema.sql](./schema.sql) in its D1 console. You can also run `npx wrangler d1 execute YOUR_DATABASE_NAME --remote --file=schema.sql` with Cloudflare CLI access.
+2. Create an **R2 bucket** for edition PDFs and leave its public access disabled. If Cloudflare asks you to activate R2, complete that in your account.
+3. Under **Settings → Bindings**, add the D1 database as `DB` and the R2 bucket as `PDFS`.
+4. Under **Settings → Variables and Secrets**, set `EDITOR_USER` and `EDITOR_PASSWORD` as secrets. Use a strong password of at least 12 characters.
+5. Redeploy so the production deployment receives the new bindings and secrets.
+
+Pages stores edition metadata in D1 and PDFs in R2. Editions outside the seven-day archive are immediately hidden from readers and cleaned up after successful uploads. The standalone Node server and its SQLite database remain available through the instructions above.

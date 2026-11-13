@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
     "dev": "node --env-file-if-exists=.env server.mjs",
-    "check": "node --check server.mjs && node --check public/app.js"
+    "check": "node --check server.mjs && node --check public/app.js && node --check 'functions/api/[[path]].js' && node --check scripts/build-pages.mjs",
+    "build": "node scripts/build-pages.mjs"
   },
   "dependencies": {
     "pdfjs-dist": "5.4.624"
